@@ -1,48 +1,70 @@
+;; TODO
+;; Firing mecanics with productivity lvl, and productivity threshold
+;; Unexpected event :
+;; - unexpected PERSON motivation
+;; - unexpected COMPANY motivation
+
+;; TODO
+;; run the simulation several times,
+;; changing only NB_PERSONS (U) or NB_COMPANY (V)
+;; and plotting the results to create the beveridge curve
+
+;; TODO
+;; change the representation of the persons and companies on canvas,
+;; linking the persons and the companies when they are connected with a job
+;; changing the shape of their representation ?
+
 breed [persons person]
 breed [companies company]
 
 globals [
   NB_PERSONS ;; number of persons
   NB_COMPANIES ;; number of companies
-  NB_PAIRS_CONSIDERED ;; "Friction" <=> Number of pairs [Person-Company] considered at each tick
+  NB_PAIRS_CONSIDERED ;; "Friction" in the labour market <=> Number of pairs [Person-Company] considered at each tick
 
-  MATCHING_SIMILARITIES_THRESHOLD
+  MATCHING_SIMILARITIES_THRESHOLD ;; Between 0 and 1 : 1 => matching extremely difficult, 0 => matching always possible
   firingThreshold
 
-  NUMBER_OF_SKILLS
-  MAX_SALARY
-  MIN_SALARY
+  NB_OF_SKILLS ;; Number of differents skills existing in our simulation
+  MAX_SALARY ;; Max salary possible in our simulation
+  MIN_SALARY ;; Min salary possible in our simulation
   MAX_DISTANCE_SALARY ;; Used for normalizing salary similarities between 0 and 1
   MAX_DISTANCE_LOCATION ;; Used for normalizing location similarities between 0 and 1
 
-  unexpectedFiring
+  ;; TO IMPLEMENT, not really impacting ?
+  UNEXPECTED_FIRING_CHANCE
   maxProductivityfluctuation
   unexpectedCompanyMotivation
   unexpectedWorkerMotivation
   excpetionalMatching
-]
 
-;; TODO
-;; productivity lvl, and productivity threshold
-;; Firing, unexpected event
+  employmentLevel   ;; NB_PERSONS - nb_UNemployed_person
+  unemploymentLevel ;; NB_PERSONS - nb_employed_person
+  employmentRate    ;; employmentLevel in %
+  unemploymentRate  ;; unemploymentLevel in %
+  ;; NB : Sum of employmentRate + unemploymentRate should be 1
+  vancyRate ;; number_job_unfilled / NB_PERSONS
+]
 
 persons-own [
   salary ;; Minimum salary wanted
   Employed ;; Boolean : Do I have an job or not ?
   skills ;; Skills posseded by the person
-  ;; Location is included in [xcor, ycor] internal variable
+  companyLinkedID ;; the employee's company ID
+  ;; Location is included in [xcor, ycor] internals variables
 ]
 
 companies-own [
   salary ;; Maximum salary offered
   filled ;; Boolean : Is the job filled or not ?
   skills ;; Skill wanted by the companies
-  ;; Location is included in [xcor, ycor] internal variable
+  employeeLinkedID ;; the company's employee ID
+  ;; Location is included in [xcor, ycor] internals variables
 ]
 
 to setup ;; Program entry
   clear-all
-  setup-globals
+  setup-globals ;; Retrieving globals value from the simulation's sliders
 
   setup-persons
   setup-companies
@@ -50,25 +72,44 @@ to setup ;; Program entry
   reset-ticks
 end
 
+to go
+  match-pairs ;; Matching employees with companies
+  ;; fire-unproductive-employees TODO
+  randomUnexpectedFiring
+  compute-statistics ;; Computing statistics for plotting
+  tick
+end
+
+
 to setup-globals
-  set NB_PERSONS 11
-  set NB_COMPANIES 10
-  set NB_PAIRS_CONSIDERED 4
-  set MATCHING_SIMILARITIES_THRESHOLD 0.5
-  set NUMBER_OF_SKILLS 5
-  set MAX_SALARY 5000
-  set MIN_SALARY 1000
+  set NB_PERSONS NUMBER_PERSONS ;; Default slider value is 100
+  set NB_COMPANIES NUMBER_COMPANIES ;;Default slider value is 100
+  set NB_PAIRS_CONSIDERED FRICTION ;;Default slider value is 5
+  set MATCHING_SIMILARITIES_THRESHOLD THRESHOLD_MATCHING_SIMILARITIES ;; Default slider value is 0.5
+  set NB_OF_SKILLS NUMBER_OF_SKILLS ;; Default slider value is 5
+  set MAX_SALARY SALARY_MAX ;; Default slider value is 5000
+  set MIN_SALARY SALARY_MIN ;; Default slider value is 1000
   set MAX_DISTANCE_SALARY MAX_SALARY - MIN_SALARY
   set MAX_DISTANCE_LOCATION sqrt(world-width * world-width + world-height * world-height)
+  set UNEXPECTED_FIRING_CHANCE UNEXPECTED_FIRING ;; Default slider value is 0.10
+end
+
+to compute-statistics
+  set employmentLevel length [who] of persons with [employed = True] ;; Selecting ALL employed persons
+  set employmentRate employmentLevel / NB_PERSONS
+  set unemploymentLevel length [who] of persons with [employed = False] ;; Selecting ALL UNemployed persons
+  set unemploymentRate unemploymentLevel / NB_PERSONS
+  set vancyRate length [who] of companies with [filled = false] / NB_PERSONS
 end
 
 to setup-persons
   create-persons NB_PERSONS [
     setxy random-xcor random-ycor
     set color red ;; Red <=> Unemployed, Green <=> Employed
-    set salary 1000
+    set salary random (MAX_SALARY - MIN_SALARY) + MIN_SALARY
     set employed false
-    set skills n-values NUMBER_OF_SKILLS [one-of [ true false ]] ;; Creating a list of size NUMBER_OF_SKILLS populated by random booleans
+    set skills n-values NB_OF_SKILLS [one-of [ true false ]] ;; Creating a list of size NUMBER_OF_SKILLS populated by random booleans
+    set companyLinkedID nobody
   ]
 end
 
@@ -76,9 +117,10 @@ to setup-companies
   create-companies NB_COMPANIES [
     setxy random-xcor random-ycor
     set color red ;; Red <=> Unfilled, Green <=> Filled
-    set salary 1200
+    set salary random (MAX_SALARY - MIN_SALARY) + MIN_SALARY
     set filled false
-    set skills n-values NUMBER_OF_SKILLS [one-of [ true false ]]
+    set skills n-values NB_OF_SKILLS [one-of [ true false ]]
+    set employeeLinkedID nobody
   ]
 end
 
@@ -104,16 +146,19 @@ to match-pairs
     [
       [unemployedPerson unfilledCompany] ->
       let similarity computeSimilarity unfilledCompany unemployedPerson
-      show similarity
+      ;;show similarity
 
       if similarity > MATCHING_SIMILARITIES_THRESHOLD [
         ask person unemployedPerson [
           set employed true
           set color green
+          set companyLinkedID unfilledCompany
+          ;;show companyLinkedID
         ]
         ask company unfilledCompany [
           set filled true
           set color green
+          set employeeLinkedID unemployedPerson
         ]
       ]
     ]
@@ -121,7 +166,6 @@ to match-pairs
 
   ;;show [skills] of person unemployedPerson
   ;;show [who] of persons with [employed = false]
-
 end
 
 ;; Simple similarity function
@@ -173,19 +217,33 @@ to-report computeSimilarity [companyID employeeID]
   report totalSimilarity
 end
 
-to go
-  ;; compute-employees-productivity
-  match-pairs
-  ;; fire-unproductive-employees
+to randomUnexpectedFiring
+  let employedList [who] of persons with [employed = True]
+  (foreach employedList ;; For each person who has a job,
+    [
+      employedPerson ->
+      if (random-float 1 < UNEXPECTED_FIRING_CHANCE) [ ;; If that person is unluncky, the person is fired :
 
-  tick
+        ask person employedPerson [
+          ask company companyLinkedID [ ;; We first relieve the company of the employee from it's employee,
+            set filled False
+            set color red
+            set employeeLinkedID nobody
+          ]
+          set employed False ;; Then relieve the employee from it's job
+          set color red
+          set companyLinkedID nobody
+        ]
+      ]
+    ]
+   )
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-210
-10
-647
-448
+898
+47
+1335
+485
 -1
 -1
 13.0
@@ -226,10 +284,10 @@ NIL
 1
 
 BUTTON
-117
-33
-180
-66
+92
+24
+155
+57
 NIL
 go\n
 T
@@ -241,6 +299,164 @@ NIL
 NIL
 NIL
 0
+
+SLIDER
+0
+175
+318
+208
+THRESHOLD_MATCHING_SIMILARITIES
+THRESHOLD_MATCHING_SIMILARITIES
+0
+1
+0.5
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+77
+188
+110
+NUMBER_PERSONS
+NUMBER_PERSONS
+0
+500
+100.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+112
+205
+145
+NUMBER_COMPANIES
+NUMBER_COMPANIES
+0
+500
+100.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+239
+265
+272
+FRICTION
+FRICTION
+0
+50
+5.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+402
+193
+435
+NUMBER_OF_SKILLS
+NUMBER_OF_SKILLS
+1
+20
+5.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+434
+172
+467
+SALARY_MAX
+SALARY_MAX
+2000
+10000
+5000.0
+100
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+467
+172
+500
+SALARY_MIN
+SALARY_MIN
+500
+1900
+1000.0
+100
+1
+NIL
+HORIZONTAL
+
+PLOT
+366
+10
+730
+230
+Unemployement rate
+time
+Unemployement
+0.0
+10.0
+0.0
+1.0
+true
+true
+"" ""
+PENS
+"Unemployment" 1.0 0 -2674135 true "" "plot unemploymentRate"
+"employment" 1.0 0 -13840069 true "" "plot employmentRate"
+"SUM" 1.0 0 -16383231 true "" "plot unemploymentRate + employmentRate"
+
+PLOT
+367
+234
+730
+459
+Vacancy rate
+time
+Vacancy rate
+0.0
+10.0
+0.0
+1.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot vancyRate"
+
+SLIDER
+0
+208
+202
+241
+UNEXPECTED_FIRING
+UNEXPECTED_FIRING
+0
+1
+0.1
+0.01
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
