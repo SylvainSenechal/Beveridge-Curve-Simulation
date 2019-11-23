@@ -1,19 +1,3 @@
-;; TODO
-;; Firing mecanics with productivity lvl, and productivity threshold
-;; Unexpected event :
-;; - unexpected PERSON motivation
-;; - unexpected COMPANY motivation
-
-;; TODO
-;; run the simulation several times,
-;; changing only NB_PERSONS (U) or NB_COMPANY (V)
-;; and plotting the results to create the beveridge curve
-
-;; TODO
-;; change the representation of the persons and companies on canvas,
-;; linking the persons and the companies when they are connected with a job
-;; changing the shape of their representation ?
-
 breed [persons person]
 breed [companies company]
 
@@ -39,6 +23,8 @@ globals [
   unemploymentRate  ;; unemploymentLevel in %
   ;; NB : Sum of employmentRate + unemploymentRate should be 1
   vancyRate ;; number_job_unfilled / NB_PERSONS
+  hiringRate
+  firingRate
 
   TICK_MIN_SIMULATION
   TICK_MAX_SIMULATION
@@ -87,7 +73,7 @@ end
 
 to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
   if checkEndSimulation [
-    set-current-plot "plot 1"
+    set-current-plot "Beveridge Curve"
     plotxy unemploymentRate vancyRate ;; Ploting a beveridge curve point
     clear-turtles
     clear-patches
@@ -179,7 +165,7 @@ to-report checkEndSimulation ;; Stopping the simulation at the right time
     set listUnemploymentRate but-first listUnemploymentRate
     set listVacancyRate but-first listVacancyRate
   ]
-
+  show abs(standard-deviation listVacancyRate)
   if ticks > TICK_MIN_SIMULATION [
     if abs(standard-deviation listUnemploymentRate) < ESPILON [
       if abs(standard-deviation listVacancyRate) < ESPILON [
@@ -211,6 +197,7 @@ to match-pairs
   set unemployedList n-of pairConsidered unemployedList
   set unfilledJob n-of pairConsidered unfilledJob
 
+  let numberHired 0 ;; Used for hiring rate
   ;; For each pairs, we try to match them together
   (foreach unemployedList unfilledJob
     [
@@ -220,6 +207,7 @@ to match-pairs
       let similarity 0.5 * similarityCompanyVSperson + 0.5 * similarityPersonVScompany
 
       if similarity > MATCHING_SIMILARITIES_THRESHOLD [
+        set numberHired numberHired + 1
         ask person unemployedPerson [
           set employed true
           set color green
@@ -234,9 +222,8 @@ to match-pairs
       ]
     ]
    )
-
-  ;;show [skills] of person unemployedPerson
-  ;;show [who] of persons with [employed = false]
+  let numberUnemployed length [who] of persons with [employed = false]
+  set hiringRate numberHired / (numberUnemployed + 1)
 end
 
 ;; Simple similarity function
@@ -314,6 +301,7 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
   let sizeMin min list length employedPeople NB_PAIRS_CONSIDERED
   set employedPeople n-of sizeMin employedPeople
 
+  let numberFired 0 ;; Used for firing rate
   foreach employedPeople
   [
     employedPerson ->
@@ -324,7 +312,7 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
                                                                                                                               ;; fluctuation aléatoire
         if productivity < FIRING_QUALITY_TRESHOLD ;; Si un employée est moins productif que le seuil limite...
         [
-          ;;show "viré"
+          set numberFired numberFired + 1
           ask company companyLinkedID [
             set employeeLinkedID nobody    ;; ... L'entreprise le vire...
             set filled false               ;; ... Le poste est laissé vacant...
@@ -345,6 +333,8 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
       ]
     ]
   ]
+  let numberEmployed length [who] of persons with [employed = True]
+  set firingRate numberFired / (numberEmployed + 1)
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -484,9 +474,9 @@ NIL
 HORIZONTAL
 
 PLOT
-366
+335
 10
-730
+699
 230
 Unemployment rate
 time
@@ -504,10 +494,10 @@ PENS
 "SUM" 1.0 0 -16383231 true "" "plot unemploymentRate + employmentRate"
 
 PLOT
-367
-234
-730
-459
+335
+229
+698
+454
 Vacancy rate
 time
 Vacancy rate
@@ -537,13 +527,13 @@ NIL
 HORIZONTAL
 
 PLOT
-370
-479
-723
-710
-plot 1
-NIL
-NIL
+335
+454
+688
+685
+Beveridge Curve
+Unemployment
+Vacancy
 0.0
 1.0
 0.0
@@ -652,6 +642,25 @@ FIRING_QUALITY_THRESHOLD
 1
 NIL
 HORIZONTAL
+
+PLOT
+10
+685
+688
+959
+hiring and firing rates
+time
+rate
+0.0
+100.0
+0.0
+1.0
+true
+true
+"" ""
+PENS
+"hiring rate" 1.0 0 -13840069 true "" "plot hiringRate"
+"firing rate" 1.0 0 -5298144 true "" "plot firingRate"
 
 @#$#@#$#@
 ## WHAT IS IT?
