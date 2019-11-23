@@ -72,7 +72,38 @@ to setup ;; Program entry
   reset-ticks
 end
 
+;;to setup ;; Program entry
+  ;;clear-all
+  ;;setup-globals ;; Retrieving globals value from the simulation's sliders
+
+  ;;setup-persons
+  ;;setup-companies
+
+  ;;reset-ticks
+;;end
+
 to go
+  if ticks > 300 [
+    clear-turtles
+    clear-patches
+    clear-drawing
+    set-current-plot "vacancy rate"
+    clear-plot
+    set-current-plot "unemployment rate"
+    clear-plot
+
+    clear-ticks
+    reset-ticks
+
+
+    set NB_PERSONS random (500 - 50) + 50
+    set NB_COMPANIES random (500 - 50) + 50
+    setup-persons
+    setup-companies
+    set-current-plot "plot 1"
+    plotxy unemploymentRate vancyRate
+  ]
+
   match-pairs ;; Matching employees with companies
   ;; fire-unproductive-employees TODO
   randomUnexpectedFiring
@@ -82,9 +113,9 @@ end
 
 
 to setup-globals
-  set NB_PERSONS NUMBER_PERSONS ;; Default slider value is 100
-  set NB_COMPANIES NUMBER_COMPANIES ;;Default slider value is 100
-  set NB_PAIRS_CONSIDERED FRICTION ;;Default slider value is 5
+  set NB_PERSONS 100
+  set NB_COMPANIES 100
+  set NB_PAIRS_CONSIDERED 50 - FRICTION ;; The higher the friction, the longer it takes to find a job, because we will consider a smaller number of pair
   set MATCHING_SIMILARITIES_THRESHOLD THRESHOLD_MATCHING_SIMILARITIES ;; Default slider value is 0.5
   set NB_OF_SKILLS NUMBER_OF_SKILLS ;; Default slider value is 5
   set MAX_SALARY SALARY_MAX ;; Default slider value is 5000
@@ -317,36 +348,6 @@ HORIZONTAL
 
 SLIDER
 0
-77
-188
-110
-NUMBER_PERSONS
-NUMBER_PERSONS
-0
-500
-100.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-0
-112
-205
-145
-NUMBER_COMPANIES
-NUMBER_COMPANIES
-0
-500
-100.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-0
 239
 265
 272
@@ -354,7 +355,7 @@ FRICTION
 FRICTION
 0
 50
-5.0
+1.0
 1
 1
 NIL
@@ -410,7 +411,7 @@ PLOT
 10
 730
 230
-Unemployement rate
+Unemployment rate
 time
 Unemployement
 0.0
@@ -457,6 +458,46 @@ UNEXPECTED_FIRING
 1
 NIL
 HORIZONTAL
+
+PLOT
+370
+479
+723
+710
+plot 1
+NIL
+NIL
+0.0
+1.0
+0.0
+5.0
+true
+false
+"" ""
+PENS
+"pen-0" 1.0 2 -7500403 true "" ""
+
+MONITOR
+0
+75
+136
+120
+NIL
+NB_PERSONS
+17
+1
+11
+
+MONITOR
+0
+120
+114
+165
+NIL
+NB_COMPANIES
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -804,6 +845,16 @@ NetLogo 6.1.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="experiment" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="500"/>
+    <metric>count turtles</metric>
+    <steppedValueSet variable="NUMBER_PERSONS" first="100" step="50" last="400"/>
+    <steppedValueSet variable="NUMBER_COMPANIES" first="100" step="50" last="400"/>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
