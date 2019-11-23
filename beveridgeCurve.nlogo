@@ -23,7 +23,9 @@ globals [
   NB_PAIRS_CONSIDERED ;; "Friction" in the labour market <=> Number of pairs [Person-Company] considered at each tick
 
   MATCHING_SIMILARITIES_THRESHOLD ;; Between 0 and 1 : 1 => matching extremely difficult, 0 => matching always possible
-  firingThreshold
+  MAX_PRODUCTIVITY_FLUCTUATION ;; Variation de productivité maximum
+  FIRING_QUALITY_TRESHOLD ;; Limite de productivité à excéder pour rester embaucher
+  UNEXPECTED_FIRING_CHANCE ;; people can randomly get fired, not extremely usefull for basic simulation
 
   NB_OF_SKILLS ;; Number of differents skills existing in our simulation
   MAX_SALARY ;; Max salary possible in our simulation
@@ -31,19 +33,18 @@ globals [
   MAX_DISTANCE_SALARY ;; Used for normalizing salary similarities between 0 and 1
   MAX_DISTANCE_LOCATION ;; Used for normalizing location similarities between 0 and 1
 
-  ;; TO IMPLEMENT, not really impacting ?
-  UNEXPECTED_FIRING_CHANCE
-  maxProductivityfluctuation
-  unexpectedCompanyMotivation
-  unexpectedWorkerMotivation
-  excpetionalMatching
-
   employmentLevel   ;; NB_PERSONS - nb_UNemployed_person
   unemploymentLevel ;; NB_PERSONS - nb_employed_person
   employmentRate    ;; employmentLevel in %
   unemploymentRate  ;; unemploymentLevel in %
   ;; NB : Sum of employmentRate + unemploymentRate should be 1
   vancyRate ;; number_job_unfilled / NB_PERSONS
+
+  TICK_MIN_SIMULATION
+  TICK_MAX_SIMULATION
+  ESPILON
+  listUnemploymentRate
+  listVacancyRate
 ]
 
 persons-own [
@@ -72,18 +73,22 @@ to setup ;; Program entry
   reset-ticks
 end
 
-;;to setup ;; Program entry
-  ;;clear-all
-  ;;setup-globals ;; Retrieving globals value from the simulation's sliders
+to go-one-experiment ;; Run the simulation ONCE
+  match-pairs ;; Matching employees with companies
+  lackOfProductivityFire ;; Firing unproductive employees
+  randomUnexpectedFiring ;; Firing employees sometimes
+  compute-statistics ;; Computing statistics for plotting
+  tick
 
-  ;;setup-persons
-  ;;setup-companies
+  if checkEndSimulation [
+    stop
+  ]
+end
 
-  ;;reset-ticks
-;;end
-
-to go
-  if ticks > 300 [
+to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
+  if checkEndSimulation [
+    set-current-plot "plot 1"
+    plotxy unemploymentRate vancyRate ;; Ploting a beveridge curve point
     clear-turtles
     clear-patches
     clear-drawing
@@ -96,25 +101,27 @@ to go
     reset-ticks
 
 
-    set NB_PERSONS random (500 - 50) + 50
-    set NB_COMPANIES random (500 - 50) + 50
+    set NB_PERSONS random (400 - 100) + 100
+    set NB_COMPANIES random (400 - 100) + 100
     setup-persons
     setup-companies
-    set-current-plot "plot 1"
-    plotxy unemploymentRate vancyRate
+    set listUnemploymentRate []
+    set listVacancyRate []
   ]
 
   match-pairs ;; Matching employees with companies
-  ;; fire-unproductive-employees TODO
-  randomUnexpectedFiring
   compute-statistics ;; Computing statistics for plotting
+  lackOfProductivityFire ;; Firing unproductive employees
+  ;;randomUnexpectedFiring
+
   tick
+
 end
 
 
 to setup-globals
-  set NB_PERSONS 100
-  set NB_COMPANIES 100
+  set NB_PERSONS NUMBER_PERSONS ;; Default slider value is 100
+  set NB_COMPANIES NUMBER_COMPANIES ;; Default slider value is 100
   set NB_PAIRS_CONSIDERED 50 - FRICTION ;; The higher the friction, the longer it takes to find a job, because we will consider a smaller number of pair
   set MATCHING_SIMILARITIES_THRESHOLD THRESHOLD_MATCHING_SIMILARITIES ;; Default slider value is 0.5
   set NB_OF_SKILLS NUMBER_OF_SKILLS ;; Default slider value is 5
@@ -123,6 +130,13 @@ to setup-globals
   set MAX_DISTANCE_SALARY MAX_SALARY - MIN_SALARY
   set MAX_DISTANCE_LOCATION sqrt(world-width * world-width + world-height * world-height)
   set UNEXPECTED_FIRING_CHANCE UNEXPECTED_FIRING ;; Default slider value is 0.10
+  set MAX_PRODUCTIVITY_FLUCTUATION PRODUCTIVITY_FLUCTUATION ;; Default slider value is 0.3
+  set FIRING_QUALITY_TRESHOLD FIRING_QUALITY_THRESHOLD ;; Default slider value is 0.5
+  set TICK_MIN_SIMULATION 300
+  set TICK_MAX_SIMULATION 2000
+  set listUnemploymentRate []
+  set listVacancyRate []
+  set ESPILON 0.017
 end
 
 to compute-statistics
@@ -137,6 +151,7 @@ to setup-persons
   create-persons NB_PERSONS [
     setxy random-xcor random-ycor
     set color red ;; Red <=> Unemployed, Green <=> Employed
+    set shape "person" ;; Les turtles person sont en forme de petits bonhommes
     set salary random (MAX_SALARY - MIN_SALARY) + MIN_SALARY
     set employed false
     set skills n-values NB_OF_SKILLS [one-of [ true false ]] ;; Creating a list of size NUMBER_OF_SKILLS populated by random booleans
@@ -148,11 +163,35 @@ to setup-companies
   create-companies NB_COMPANIES [
     setxy random-xcor random-ycor
     set color red ;; Red <=> Unfilled, Green <=> Filled
+    set shape "box" ;; Les turtles company sont en forme de boîtes
     set salary random (MAX_SALARY - MIN_SALARY) + MIN_SALARY
     set filled false
     set skills n-values NB_OF_SKILLS [one-of [ true false ]]
     set employeeLinkedID nobody
   ]
+end
+
+to-report checkEndSimulation ;; Stopping the simulation at the right time
+  set listUnemploymentRate lput unemploymentRate listUnemploymentRate
+  set listVacancyRate lput vancyRate listVacancyRate
+
+  if ticks > 200 [ ;; Keeping only the last 200 values for computing mean
+    set listUnemploymentRate but-first listUnemploymentRate
+    set listVacancyRate but-first listVacancyRate
+  ]
+
+  if ticks > TICK_MIN_SIMULATION [
+    if abs(standard-deviation listUnemploymentRate) < ESPILON [
+      if abs(standard-deviation listVacancyRate) < ESPILON [
+        report True ;; If value are not changing anymore, end the simulation
+      ]
+    ]
+    if ticks > TICK_MAX_SIMULATION [
+      report True ;; Stop if the ticks are exceedings the limitation
+    ]
+  ]
+
+  report False ;; if ! ticks > TICK_MIN_SIMULATION, simulation continues
 end
 
 to match-pairs
@@ -176,15 +215,16 @@ to match-pairs
   (foreach unemployedList unfilledJob
     [
       [unemployedPerson unfilledCompany] ->
-      let similarity computeSimilarity unfilledCompany unemployedPerson
-      ;;show similarity
+      let similarityCompanyVSperson computeSimilarity unfilledCompany unemployedPerson
+      let similarityPersonVScompany computeSimilarity unemployedPerson unfilledCompany
+      let similarity 0.5 * similarityCompanyVSperson + 0.5 * similarityPersonVScompany
 
       if similarity > MATCHING_SIMILARITIES_THRESHOLD [
         ask person unemployedPerson [
           set employed true
           set color green
           set companyLinkedID unfilledCompany
-          ;;show companyLinkedID
+          create-link-with company companyLinkedID
         ]
         ask company unfilledCompany [
           set filled true
@@ -200,26 +240,22 @@ to match-pairs
 end
 
 ;; Simple similarity function
-to-report computeSimilarity [companyID employeeID]
-  ;;//////////////////////////////////////////////////////////////////////////////////////
-  ;; Skill similarities : how many skills the employee have that the company ALSO needs //
-  ;;//////////////////////////////////////////////////////////////////////////////////////
-  let skillsCompany [skills] of company companyID
-  let skillsEmployee [skills] of person employeeID
+to-report computeSimilarity [ID1 ID2]
+  ;;//////////////////////
+  ;; Skill similarities //
+  ;;//////////////////////
+  let skillsCompany [skills] of turtle ID1
+  let skillsEmployee [skills] of turtle ID2
 
   let similarSkills 0
-  let nbSkilledWanted length filter [skill -> skill = true] skillsCompany
   (foreach skillsCompany skillsEmployee
     [
       [skillXcompany skillXemployee] ->
-      if (skillXcompany and  skillXemployee) [set similarSkills similarSkills + 1]
+      if (skillXcompany = skillXemployee) [set similarSkills similarSkills + 1]
     ]
    )
 
-  ;; Here we normalize the skill similarity, and handle the division by 0 bug when the company wants 0 skills
-  ifelse nbSkilledWanted = 0
-    [ set similarSkills 0 ]
-    [ set similarSkills similarSkills / nbSkilledWanted]
+  set similarSkills similarSkills / NB_OF_SKILLS ;; normalizing
 
   ;;//////////////////////////////////////////////////////////////////////////
   ;; Salary similarities : Distance between the company and employee salary //
@@ -230,8 +266,8 @@ to-report computeSimilarity [companyID employeeID]
   ;; so we just compute tha salary similarity as the absolute difference between
   ;; what the employee wants and what the company offers (pretty bad heuristic here)
 
-  let salaryOffered [salary] of company companyID
-  let salaryWanted [salary] of person employeeID
+  let salaryOffered [salary] of turtle ID1
+  let salaryWanted [salary] of turtle ID2
   let salarySimilarity abs(salaryOffered - salaryWanted)
   set salarySimilarity salarySimilarity / MAX_DISTANCE_SALARY ;; Normalizing
   set salarySimilarity 1 - salarySimilarity ;; We want 1 <=> very similar, instead of 0 <=> very similar
@@ -239,17 +275,19 @@ to-report computeSimilarity [companyID employeeID]
   ;;/////////////////////////
   ;; Location similarities //
   ;;/////////////////////////
-  let locationSimilarities [distance company companyID] of person employeeID
+  let locationSimilarities [distance turtle ID2] of turtle ID1
   set locationSimilarities locationSimilarities / MAX_DISTANCE_LOCATION ;; normalizing
+  set locationSimilarities 1 - locationSimilarities ;; We want 1 <=> very similar, instead of 0 <=> very similar
 
   let totalSimilarity (similarSkills + salarySimilarity + locationSimilarities)
   set totalSimilarity totalSimilarity / 3 ;; normalizing
 
-  report totalSimilarity
+  report totalSimilarity * 0.60
 end
 
 to randomUnexpectedFiring
   let employedList [who] of persons with [employed = True]
+
   (foreach employedList ;; For each person who has a job,
     [
       employedPerson ->
@@ -260,6 +298,7 @@ to randomUnexpectedFiring
             set filled False
             set color red
             set employeeLinkedID nobody
+            ask my-links [die]
           ]
           set employed False ;; Then relieve the employee from it's job
           set color red
@@ -269,15 +308,53 @@ to randomUnexpectedFiring
     ]
    )
 end
+
+to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproductifs
+  let employedPeople [who] of persons with [employed = True]  ;; On récupère les IDs des persons employées
+  let sizeMin min list length employedPeople NB_PAIRS_CONSIDERED
+  set employedPeople n-of sizeMin employedPeople
+
+  foreach employedPeople
+  [
+    employedPerson ->
+    if (random-float 1 < UNEXPECTED_FIRING_CHANCE) [ ;; De temps en temps, la productivité de l'employé est analysé
+      ask person employedPerson [
+        let productivity computeSimilarity who companyLinkedID   ;; Productivité de la personne a dans l'entreprise b <=> similarité de a vers b
+        set productivity ( productivity + (random-float (2 * MAX_PRODUCTIVITY_FLUCTUATION) - MAX_PRODUCTIVITY_FLUCTUATION ))  ;; La productivité est additionnée d'une petite
+                                                                                                                              ;; fluctuation aléatoire
+        if productivity < FIRING_QUALITY_TRESHOLD ;; Si un employée est moins productif que le seuil limite...
+        [
+          ;;show "viré"
+          ask company companyLinkedID [
+            set employeeLinkedID nobody    ;; ... L'entreprise le vire...
+            set filled false               ;; ... Le poste est laissé vacant...
+            set color red
+            ;;setxy (0 - random-float 16) (0 - random-float 16)  ;; ... l'entreprise retourne dans le quadrant sud-ouest
+          ]
+
+          ask person employedPerson[
+            set companyLinkedID nobody
+            set employed false
+            ask my-links [die]
+            set color red
+            ;;setxy (0 - random-float 16) (1 + random-float 15)
+          ]
+          ;;show ticks
+          ;;show "Someone has been fired for lack of productivity" ;;Pour voir si des gens se font vraiment virer pour manque de productivité
+        ]
+      ]
+    ]
+  ]
+end
 @#$#@#$#@
 GRAPHICS-WINDOW
-898
-47
-1335
-485
+905
+10
+1697
+803
 -1
 -1
-13.0
+23.76
 1
 10
 1
@@ -298,10 +375,10 @@ ticks
 30.0
 
 BUTTON
+3
 17
-24
-90
-57
+76
+50
 NIL
 setup
 NIL
@@ -315,12 +392,12 @@ NIL
 1
 
 BUTTON
-92
-24
-155
-57
+76
+17
+243
+50
 NIL
-go\n
+go-one-experiment\n
 T
 1
 T
@@ -333,9 +410,9 @@ NIL
 
 SLIDER
 0
-175
+287
 318
-208
+320
 THRESHOLD_MATCHING_SIMILARITIES
 THRESHOLD_MATCHING_SIMILARITIES
 0
@@ -348,14 +425,14 @@ HORIZONTAL
 
 SLIDER
 0
-239
+352
 265
-272
+385
 FRICTION
 FRICTION
 0
-50
-1.0
+45
+0.0
 1
 1
 NIL
@@ -446,9 +523,9 @@ PENS
 
 SLIDER
 0
-208
+319
 202
-241
+352
 UNEXPECTED_FIRING
 UNEXPECTED_FIRING
 0
@@ -470,7 +547,7 @@ NIL
 0.0
 1.0
 0.0
-5.0
+3.0
 true
 false
 "" ""
@@ -479,9 +556,9 @@ PENS
 
 MONITOR
 0
-75
+85
 136
-120
+130
 NIL
 NB_PERSONS
 17
@@ -490,14 +567,91 @@ NB_PERSONS
 
 MONITOR
 0
-120
+130
 114
-165
+175
 NIL
 NB_COMPANIES
 17
 1
 11
+
+BUTTON
+77
+51
+203
+84
+NIL
+go-beveridge
+T
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+0
+197
+190
+230
+NUMBER_PERSONS
+NUMBER_PERSONS
+50
+500
+100.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+230
+205
+263
+NUMBER_COMPANIES
+NUMBER_COMPANIES
+50
+500
+100.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+535
+257
+568
+PRODUCTIVITY_FLUCTUATION
+PRODUCTIVITY_FLUCTUATION
+0
+1
+0.3
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+568
+256
+601
+FIRING_QUALITY_THRESHOLD
+FIRING_QUALITY_THRESHOLD
+0.20
+0.50
+0.5
+0.01
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
