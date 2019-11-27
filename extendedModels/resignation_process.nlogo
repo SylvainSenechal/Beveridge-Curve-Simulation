@@ -31,6 +31,8 @@ globals [
   ESPILON
   listUnemploymentRate
   listVacancyRate
+
+  RESIGNATION_PROBABILITY
 ]
 
 persons-own [
@@ -39,6 +41,7 @@ persons-own [
   skills ;; Skills posseded by the person
   companyLinkedID ;; the employee's company ID
   ;; Location is included in [xcor, ycor] internals variables
+  hiring_time ;; Temps depuis lequel une personne est employée
 ]
 
 companies-own [
@@ -62,10 +65,16 @@ end
 to go-one-experiment ;; Run the simulation ONCE
   match-pairs ;; Matching employees with companies
   lackOfProductivityFire ;; Firing unproductive employees
+  randomUnexpectedFiring ;; Firing employees sometimes
   compute-statistics ;; Computing statistics for plotting
+  resign
+
+  ask persons with [employed = true]
+  [set hiring_time hiring_time + 1]
   tick
 
-  if checkEndSimulation [
+
+  if ticks > 1000 [
     stop
   ]
 end
@@ -87,9 +96,9 @@ to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
     clear-ticks
     reset-ticks
 
-
-    set NB_PERSONS random (400 - 100) + 100
-    set NB_COMPANIES random (400 - 100) + 100
+    let values [100 200 300 400]
+    set NB_PERSONS one-of values
+    set NB_COMPANIES one-of values
     setup-persons
     setup-companies
     set listUnemploymentRate []
@@ -99,8 +108,11 @@ to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
   match-pairs ;; Matching employees with companies
   compute-statistics ;; Computing statistics for plotting
   lackOfProductivityFire ;; Firing unproductive employees
+  randomUnexpectedFiring
+  resign
 
   tick
+
 end
 
 
@@ -122,6 +134,8 @@ to setup-globals
   set listUnemploymentRate []
   set listVacancyRate []
   set ESPILON 0.025
+
+  set RESIGNATION_PROBABILITY 0.05
 end
 
 to compute-statistics
@@ -141,6 +155,7 @@ to setup-persons
     set employed false
     set skills n-values NB_OF_SKILLS [one-of [ true false ]] ;; Creating a list of size NUMBER_OF_SKILLS populated by random booleans
     set companyLinkedID nobody
+    set hiring_time 0
   ]
 end
 
@@ -198,7 +213,6 @@ to match-pairs
   set unfilledJob n-of pairConsidered unfilledJob
 
   let numberHired 0 ;; Used for hiring rate
-  let numberUnemployed length [who] of persons with [employed = false]
   ;; For each pairs, we try to match them together
   (foreach unemployedList unfilledJob
     [
@@ -223,6 +237,7 @@ to match-pairs
       ]
     ]
    )
+  let numberUnemployed length [who] of persons with [employed = false]
   set hiringRate numberHired / (numberUnemployed + 1)
 end
 
@@ -290,6 +305,7 @@ to randomUnexpectedFiring
           set employed False ;; Then relieve the employee from it's job
           set color red
           set companyLinkedID nobody
+          set hiring_time 0 ;; La personne est maintenant employée depuis 0 ticks
         ]
       ]
     ]
@@ -302,7 +318,6 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
   set employedPeople n-of sizeMin employedPeople
 
   let numberFired 0 ;; Used for firing rate
-  let numberEmployed length [who] of persons with [employed = True]
   foreach employedPeople
   [
     employedPerson ->
@@ -326,6 +341,7 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
             set employed false
             ask my-links [die]
             set color red
+            set hiring_time 0
             ;;setxy (0 - random-float 16) (1 + random-float 15)
           ]
           ;;show ticks
@@ -334,7 +350,89 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
       ]
     ]
   ]
+  let numberEmployed length [who] of persons with [employed = True]
   set firingRate numberFired / (numberEmployed + 1)
+end
+
+to resign ;; démissioner pour une meilleure opportunité
+
+  let vacantJobs [who] of companies with [filled = false]
+  let employedJobSeekers [who] of persons with [employed = true]
+
+
+  (foreach employedJobSeekers[    ;;On liste les employés insatisfaits
+    [employedJobSeeker] ->
+
+    ask person employedJobSeeker [
+      let satisfaction_fluctuation random-normal 0 1
+      set satisfaction_fluctuation 1 - 1 /(1 - exp satisfaction_fluctuation)  ;; On choisit aléatoirement une fluctuation de la satisfaction qui vaut en moyenne 0
+
+      let s one-of [-1 1]
+      let satisfaction (computeSimilarity employedJobSeeker companyLinkedID) + s * satisfaction_fluctuation
+
+      if (satisfaction > SATISFACTION_TRESHOLD)[
+        set employedJobSeekers remove employedJobSeeker employedJobSeekers
+      ]
+    ]
+    ]
+  )
+
+
+  let sizeMin min list length vacantJobs length employedJobSeekers   ;; De même que dans l'algorithme de matching, on s'assure que n <= min(Nb d'employés, Nb de postes vacants)
+  let n min list sizeMin NB_PAIRS_CONSIDERED
+
+
+
+  set employedJobSeekers n-of n employedJobSeekers           ;; On prélève un certain nombre n d'employé et d'entreprises seulement (et pas tous), encore une fois pour
+  set vacantJobs n-of n vacantJobs                           ;; modéliser le fait que les employés n'ont pas une connaissance parfaite du marché
+
+
+  let counter 0  ;; Compte le nombre de démission à chaque tick
+
+  (foreach employedJobSeekers vacantJobs
+    [
+      [employedJobSeeker vacantJob] ->
+
+      let similarityCompanyVSperson computeSimilarity vacantJob employedJobSeeker          ;; On calcule la similarité avec une éventuelle nouvelle opportunité
+      let similarityPersonVScompany computeSimilarity employedJobSeeker vacantJob
+      let newSimilarity 0.5 * similarityCompanyVSperson + 0.5 * similarityPersonVScompany
+
+      ask person employedJobSeeker [
+
+        set similarityCompanyVSperson computeSimilarity companyLinkedID who                 ;; On calcule la similarité avec le poste actuelle
+        set similarityPersonVScompany computeSimilarity who companyLinkedID
+        let currentSimilarity 0.5 * similarityCompanyVSperson + 0.5 * similarityPersonVScompany
+        let p random-float (1)
+
+        if (newSimilarity > currentSimilarity) and (p < RESIGNATION_PROBABILITY) [ ;; On n'a pas besoin de tester si la nouvelle similarité est supérieur au matching treshold
+                                                                                   ;; En effet, currentSimilarity >= matchingTreshold
+                                                                                   ;; donc newSimilarity > currentSimilarity => newSimilarity > matchingTreshold
+
+
+          ask company companyLinkedID [  ;; L'ancien poste devient vacant
+            set filled false
+            set employeeLinkedID nobody
+          ]
+
+          set companyLinkedID vacantJob
+          create-link-with company companyLinkedID
+          ask my-links [die]
+
+          ask company vacantJob [
+            set filled true
+            set color green
+            set employeeLinkedID employedJobSeeker
+          ]
+
+
+          set counter counter + 1
+          show list ticks counter  ;; Affiche le nombre de démission à chaque tick
+        ]
+      ]
+    ]
+  )
+
+
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -494,10 +592,10 @@ PENS
 "SUM" 1.0 0 -16383231 true "" "plot unemploymentRate + employmentRate"
 
 PLOT
-334
-230
-697
-455
+335
+229
+698
+454
 Vacancy rate
 time
 Vacancy rate
@@ -520,16 +618,16 @@ UNEXPECTED_FIRING
 UNEXPECTED_FIRING
 0
 1
-0.1
+0.01
 0.01
 1
 NIL
 HORIZONTAL
 
 PLOT
-336
+335
 454
-689
+688
 685
 Beveridge Curve
 Unemployment
@@ -581,7 +679,7 @@ NIL
 NIL
 NIL
 NIL
-0
+1
 
 SLIDER
 0
@@ -644,10 +742,10 @@ NIL
 HORIZONTAL
 
 PLOT
-332
-686
-694
-960
+10
+685
+688
+959
 hiring and firing rates
 time
 rate
@@ -661,6 +759,21 @@ true
 PENS
 "hiring rate" 1.0 0 -13840069 true "" "plot hiringRate"
 "firing rate" 1.0 0 -5298144 true "" "plot firingRate"
+
+SLIDER
+128
+148
+330
+181
+SATISFACTION_TRESHOLD
+SATISFACTION_TRESHOLD
+0
+1
+0.9
+0.1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -1004,7 +1117,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.1.0
+NetLogo 6.1.1
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@

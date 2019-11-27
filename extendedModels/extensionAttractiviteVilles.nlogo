@@ -2,6 +2,9 @@ breed [persons person]
 breed [companies company]
 
 globals [
+  LOCATION_MAX_THRESHOLD ;; A person will refuse to go in a company that is farther than this distance
+  MOVING_MAX_THRESHOLD ;; A person is capable of moving closer to it's company
+
   NB_PERSONS ;; number of persons
   NB_COMPANIES ;; number of companies
   NB_PAIRS_CONSIDERED ;; "Friction" in the labour market <=> Number of pairs [Person-Company] considered at each tick
@@ -62,6 +65,7 @@ end
 to go-one-experiment ;; Run the simulation ONCE
   match-pairs ;; Matching employees with companies
   lackOfProductivityFire ;; Firing unproductive employees
+  randomUnexpectedFiring ;; Firing employees sometimes
   compute-statistics ;; Computing statistics for plotting
   tick
 
@@ -99,12 +103,17 @@ to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
   match-pairs ;; Matching employees with companies
   compute-statistics ;; Computing statistics for plotting
   lackOfProductivityFire ;; Firing unproductive employees
+  ;;randomUnexpectedFiring
 
   tick
+
 end
 
 
 to setup-globals
+  set LOCATION_MAX_THRESHOLD LOCATION_THRESHOLD ;; Default slider value is 0.1
+  set MOVING_MAX_THRESHOLD MOVING_THRESHOLD ;; ;; Default slider value is 0.05
+
   set NB_PERSONS NUMBER_PERSONS ;; Default slider value is 100
   set NB_COMPANIES NUMBER_COMPANIES ;; Default slider value is 100
   set NB_PAIRS_CONSIDERED 50 - FRICTION ;; The higher the friction, the longer it takes to find a job, because we will consider a smaller number of pair
@@ -117,7 +126,7 @@ to setup-globals
   set UNEXPECTED_FIRING_CHANCE UNEXPECTED_FIRING ;; Default slider value is 0.10
   set MAX_PRODUCTIVITY_FLUCTUATION PRODUCTIVITY_FLUCTUATION ;; Default slider value is 0.3
   set FIRING_QUALITY_TRESHOLD FIRING_QUALITY_THRESHOLD ;; Default slider value is 0.5
-  set TICK_MIN_SIMULATION 300
+  set TICK_MIN_SIMULATION 600
   set TICK_MAX_SIMULATION 2000
   set listUnemploymentRate []
   set listVacancyRate []
@@ -137,6 +146,7 @@ to setup-persons
     setxy random-xcor random-ycor
     set color red ;; Red <=> Unemployed, Green <=> Employed
     set shape "person" ;; Les turtles person sont en forme de petits bonhommes
+    set size 0.5
     set salary random (MAX_SALARY - MIN_SALARY) + MIN_SALARY
     set employed false
     set skills n-values NB_OF_SKILLS [one-of [ true false ]] ;; Creating a list of size NUMBER_OF_SKILLS populated by random booleans
@@ -146,9 +156,11 @@ end
 
 to setup-companies
   create-companies NB_COMPANIES [
-    setxy random-xcor random-ycor
+    ;;setxy random-xcor random-ycor
+    setxy one-of [ -8 0 8 ] + random-float 1 one-of [ -8 8 ] + random-float 1
     set color red ;; Red <=> Unfilled, Green <=> Filled
     set shape "box" ;; Les turtles company sont en forme de boîtes
+    set size 1
     set salary random (MAX_SALARY - MIN_SALARY) + MIN_SALARY
     set filled false
     set skills n-values NB_OF_SKILLS [one-of [ true false ]]
@@ -198,7 +210,6 @@ to match-pairs
   set unfilledJob n-of pairConsidered unfilledJob
 
   let numberHired 0 ;; Used for hiring rate
-  let numberUnemployed length [who] of persons with [employed = false]
   ;; For each pairs, we try to match them together
   (foreach unemployedList unfilledJob
     [
@@ -214,6 +225,9 @@ to match-pairs
           set color green
           set companyLinkedID unfilledCompany
           create-link-with company companyLinkedID
+          move-to company companyLinkedID
+          right random 360
+          forward random-float 2 + 1
         ]
         ask company unfilledCompany [
           set filled true
@@ -223,6 +237,7 @@ to match-pairs
       ]
     ]
    )
+  let numberUnemployed length [who] of persons with [employed = false]
   set hiringRate numberHired / (numberUnemployed + 1)
 end
 
@@ -266,8 +281,13 @@ to-report computeSimilarity [ID1 ID2]
   set locationSimilarities locationSimilarities / MAX_DISTANCE_LOCATION ;; normalizing
   set locationSimilarities 1 - locationSimilarities ;; We want 1 <=> very similar, instead of 0 <=> very similar
 
-  let totalSimilarity (similarSkills + salarySimilarity + locationSimilarities)
+  let totalSimilarity (similarSkills * 1 + salarySimilarity * 1 + locationSimilarities * 1) ;; Location has more weight in this simulation
   set totalSimilarity totalSimilarity / 3 ;; normalizing
+
+
+  if [distance turtle ID2] of turtle ID1 / MAX_DISTANCE_LOCATION > (LOCATION_MAX_THRESHOLD + MOVING_MAX_THRESHOLD) [
+    report 0
+  ]
 
   report totalSimilarity * 0.60
 end
@@ -302,7 +322,6 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
   set employedPeople n-of sizeMin employedPeople
 
   let numberFired 0 ;; Used for firing rate
-  let numberEmployed length [who] of persons with [employed = True]
   foreach employedPeople
   [
     employedPerson ->
@@ -334,6 +353,7 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
       ]
     ]
   ]
+  let numberEmployed length [who] of persons with [employed = True]
   set firingRate numberFired / (numberEmployed + 1)
 end
 @#$#@#$#@
@@ -494,10 +514,10 @@ PENS
 "SUM" 1.0 0 -16383231 true "" "plot unemploymentRate + employmentRate"
 
 PLOT
-334
-230
-697
-455
+335
+229
+698
+454
 Vacancy rate
 time
 Vacancy rate
@@ -520,16 +540,16 @@ UNEXPECTED_FIRING
 UNEXPECTED_FIRING
 0
 1
-0.1
+0.01
 0.01
 1
 NIL
 HORIZONTAL
 
 PLOT
-336
+335
 454
-689
+688
 685
 Beveridge Curve
 Unemployment
@@ -581,7 +601,7 @@ NIL
 NIL
 NIL
 NIL
-0
+1
 
 SLIDER
 0
@@ -592,7 +612,7 @@ NUMBER_PERSONS
 NUMBER_PERSONS
 50
 500
-100.0
+300.0
 10
 1
 NIL
@@ -607,7 +627,7 @@ NUMBER_COMPANIES
 NUMBER_COMPANIES
 50
 500
-100.0
+300.0
 10
 1
 NIL
@@ -644,23 +664,53 @@ NIL
 HORIZONTAL
 
 PLOT
-332
-686
-694
-960
+10
+685
+688
+959
 hiring and firing rates
 time
 rate
 0.0
 100.0
 0.0
-0.3
+0.1
 true
 true
 "" ""
 PENS
 "hiring rate" 1.0 0 -13840069 true "" "plot hiringRate"
 "firing rate" 1.0 0 -5298144 true "" "plot firingRate"
+
+SLIDER
+0
+615
+216
+648
+LOCATION_THRESHOLD
+LOCATION_THRESHOLD
+0
+1
+0.15
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+648
+203
+681
+MOVING_THRESHOLD
+MOVING_THRESHOLD
+0
+0.1
+0.05
+0.01
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?

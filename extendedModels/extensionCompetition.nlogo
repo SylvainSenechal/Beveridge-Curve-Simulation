@@ -6,6 +6,8 @@ globals [
   NB_COMPANIES ;; number of companies
   NB_PAIRS_CONSIDERED ;; "Friction" in the labour market <=> Number of pairs [Person-Company] considered at each tick
 
+  PRESSURE_SALARY ;; How important is the salary for the companies (they want to offer lower salary)
+
   MATCHING_SIMILARITIES_THRESHOLD ;; Between 0 and 1 : 1 => matching extremely difficult, 0 => matching always possible
   MAX_PRODUCTIVITY_FLUCTUATION ;; Variation de productivité maximum
   FIRING_QUALITY_TRESHOLD ;; Limite de productivité à excéder pour rester embaucher
@@ -71,9 +73,27 @@ to go-one-experiment ;; Run the simulation ONCE
 end
 
 to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
+
   if checkEndSimulation [
+
+
     set-current-plot "Beveridge Curve"
+    ifelse PRESSURE_SALARY = 1 [
+      set-current-plot-pen "low-pressure"
+    ][
+      set-current-plot-pen "high-pressure"
+    ]
     plotxy unemploymentRate vancyRate ;; Ploting a beveridge curve point
+
+    set-current-plot "Mean salary"
+    ifelse PRESSURE_SALARY = 1 [
+      set-current-plot-pen "low-pressure"
+    ][
+      set-current-plot-pen "high-pressure"
+    ]
+
+    plot mean [salary] of persons with [employed = True] ;; Ploting mean salary of employed person
+
     clear-turtles
     clear-patches
     clear-drawing
@@ -87,24 +107,27 @@ to go-beveridge ;; Run the simulation SEVERAL times to get the beveridge curve
     clear-ticks
     reset-ticks
 
-
     set NB_PERSONS random (400 - 100) + 100
     set NB_COMPANIES random (400 - 100) + 100
     setup-persons
     setup-companies
     set listUnemploymentRate []
     set listVacancyRate []
+
+    set PRESSURE_SALARY one-of [1 25]
   ]
-
   match-pairs ;; Matching employees with companies
-  compute-statistics ;; Computing statistics for plotting
-  lackOfProductivityFire ;; Firing unproductive employees
 
+  lackOfProductivityFire ;; Firing unproductive employees
+  compute-statistics ;; Computing statistics for plotting
   tick
+
 end
 
 
 to setup-globals
+  set PRESSURE_SALARY PRESSURE_SALARY_FROM_COMPANIES
+
   set NB_PERSONS NUMBER_PERSONS ;; Default slider value is 100
   set NB_COMPANIES NUMBER_COMPANIES ;; Default slider value is 100
   set NB_PAIRS_CONSIDERED 50 - FRICTION ;; The higher the friction, the longer it takes to find a job, because we will consider a smaller number of pair
@@ -181,119 +204,108 @@ to-report checkEndSimulation ;; Stopping the simulation at the right time
 end
 
 to match-pairs
-  let unemployedList []
+  let numberHired 0 ;; Used for hiring rate
   let unfilledJob []
-
-  set unemployedList [who] of persons with [employed = false] ;; Selecting ALL unemployed persons
   set unfilledJob [who] of companies with [filled = false]    ;; Selecting ALL companies looking for someone
 
   ;; If the size of one of the 2 list above is smaller than nbPairsConsired,
   ;; we cannot considerer nbPairsConsidered of pairs,
   ;; so we need to consider the maximum number of pair available, without bugs, thus the 2 lines :
-  let sizeMin min list length unemployedList length unfilledJob
-  let pairConsidered min list sizeMin NB_PAIRS_CONSIDERED
+  let pairConsidered min list length unfilledJob NB_PAIRS_CONSIDERED
 
   ;; We can now select our pairs of the right size without bugs
-  set unemployedList n-of pairConsidered unemployedList
   set unfilledJob n-of pairConsidered unfilledJob
 
-  let numberHired 0 ;; Used for hiring rate
-  let numberUnemployed length [who] of persons with [employed = false]
-  ;; For each pairs, we try to match them together
-  (foreach unemployedList unfilledJob
-    [
-      [unemployedPerson unfilledCompany] ->
-      let similarityCompanyVSperson computeSimilarity unfilledCompany unemployedPerson
-      let similarityPersonVScompany computeSimilarity unemployedPerson unfilledCompany
-      let similarity 0.5 * similarityCompanyVSperson + 0.5 * similarityPersonVScompany
+  foreach unfilledJob [
+    unfilledCompany ->
 
-      if similarity > MATCHING_SIMILARITIES_THRESHOLD [
-        set numberHired numberHired + 1
-        ask person unemployedPerson [
-          set employed true
-          set color green
-          set companyLinkedID unfilledCompany
-          create-link-with company companyLinkedID
-        ]
-        ask company unfilledCompany [
-          set filled true
-          set color green
-          set employeeLinkedID unemployedPerson
-        ]
+    let maxSimilarity 0
+    let bestPersonID -1
+    let unemployedList []
+    set unemployedList [who] of persons with [employed = false] ;; Selecting ALL unemployed persons
+    let nbConsidrd min list length unemployedList NB_PAIRS_CONSIDERED
+    set unemployedList n-of nbConsidrd unemployedList
+
+    foreach unemployedList [
+      unemployedPerson ->
+      let similarity computeSimilarity unemployedPerson unfilledCompany
+      if similarity > maxSimilarity [
+        set maxSimilarity similarity
+        set bestPersonID unemployedPerson
       ]
     ]
-   )
+    if bestPersonID > -1 and maxSimilarity > MATCHING_SIMILARITIES_THRESHOLD [
+      set numberHired numberHired + 1
+      ask person bestPersonID [
+        set employed true
+        set color green
+        set companyLinkedID unfilledCompany
+        create-link-with company companyLinkedID
+      ]
+      ask company unfilledCompany [
+        set filled true
+        set color green
+        set employeeLinkedID bestPersonID
+      ]
+    ]
+  ]
+
+  let numberUnemployed length [who] of persons with [employed = false]
   set hiringRate numberHired / (numberUnemployed + 1)
 end
 
 ;; Simple similarity function
-to-report computeSimilarity [ID1 ID2]
+to-report computeSimilarity [unemployedPerson unfilledCompany]
   ;;//////////////////////
   ;; Skill similarities //
   ;;//////////////////////
-  let skillsCompany [skills] of turtle ID1
-  let skillsEmployee [skills] of turtle ID2
+  let skillsCompany [skills] of company unfilledCompany
+  let skillsEmployee [skills] of person unemployedPerson
 
   let similarSkills 0
+  let nbSkilledWanted length filter [skill -> skill = true] skillsCompany
   (foreach skillsCompany skillsEmployee
     [
       [skillXcompany skillXemployee] ->
-      if (skillXcompany = skillXemployee) [set similarSkills similarSkills + 1]
+      if (skillXcompany and skillXemployee) [set similarSkills similarSkills + 1]
     ]
    )
 
-  set similarSkills similarSkills / NB_OF_SKILLS ;; normalizing
+  ;; Here we normalize the skill similarity, and handle the division by 0 bug when the company wants 0 skills
+  ifelse nbSkilledWanted = 0
+    [ set similarSkills 0 ]
+    [ set similarSkills similarSkills / nbSkilledWanted]
 
-  ;;//////////////////////////////////////////////////////////////////////////
-  ;; Salary similarities : Distance between the company and employee salary //
-  ;;//////////////////////////////////////////////////////////////////////////
+  ;;///////////////////////
+  ;; Salary similarities //
+  ;;///////////////////////
   ;; Exemple : If the employee wants 3000 and the company offers 2000,
   ;; that's - 1000 for the employee and + 1000 for the company,
   ;; Doing the mean value of this would always computes to 0,
   ;; so we just compute tha salary similarity as the absolute difference between
   ;; what the employee wants and what the company offers (pretty bad heuristic here)
 
-  let salaryOffered [salary] of turtle ID1
-  let salaryWanted [salary] of turtle ID2
-  let salarySimilarity abs(salaryOffered - salaryWanted)
-  set salarySimilarity salarySimilarity / MAX_DISTANCE_SALARY ;; Normalizing
-  set salarySimilarity 1 - salarySimilarity ;; We want 1 <=> very similar, instead of 0 <=> very similar
+  let salaryOffered [salary] of company unfilledCompany
+  let salaryWanted [salary] of person unemployedPerson
+  let salarySimilarity 0
+  ifelse (salaryWanted > salaryOffered) [ ;; If the employee wants too much, similarity will be between 0 and 0.5
+    set salarySimilarity 0.5 - (salaryWanted - salaryOffered) / (MAX_DISTANCE_SALARY * 2)
+  ][ ;; else similarity will be between 0.5 and 1
+    set salarySimilarity 0.5 + (salaryOffered - salaryWanted) / (MAX_DISTANCE_SALARY * 2)
+  ]
 
+  ;;set salarySimilarity salarySimilarity * (1 - PRESSURE_SALARY)
   ;;/////////////////////////
   ;; Location similarities //
   ;;/////////////////////////
-  let locationSimilarities [distance turtle ID2] of turtle ID1
+  let locationSimilarities [distance person unemployedPerson] of company unfilledCompany
   set locationSimilarities locationSimilarities / MAX_DISTANCE_LOCATION ;; normalizing
   set locationSimilarities 1 - locationSimilarities ;; We want 1 <=> very similar, instead of 0 <=> very similar
 
-  let totalSimilarity (similarSkills + salarySimilarity + locationSimilarities)
-  set totalSimilarity totalSimilarity / 3 ;; normalizing
+  let totalSimilarity (similarSkills + salarySimilarity * PRESSURE_SALARY + locationSimilarities)
+  set totalSimilarity totalSimilarity / (2 + PRESSURE_SALARY) ;; normalizing
 
   report totalSimilarity * 0.60
-end
-
-to randomUnexpectedFiring
-  let employedList [who] of persons with [employed = True]
-
-  (foreach employedList ;; For each person who has a job,
-    [
-      employedPerson ->
-      if (random-float 1 < UNEXPECTED_FIRING_CHANCE) [ ;; If that person is unluncky, the person is fired :
-
-        ask person employedPerson [
-          ask company companyLinkedID [ ;; We first relieve the company of the employee from it's employee,
-            set filled False
-            set color red
-            set employeeLinkedID nobody
-            ask my-links [die]
-          ]
-          set employed False ;; Then relieve the employee from it's job
-          set color red
-          set companyLinkedID nobody
-        ]
-      ]
-    ]
-   )
 end
 
 to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproductifs
@@ -302,7 +314,6 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
   set employedPeople n-of sizeMin employedPeople
 
   let numberFired 0 ;; Used for firing rate
-  let numberEmployed length [who] of persons with [employed = True]
   foreach employedPeople
   [
     employedPerson ->
@@ -334,6 +345,7 @@ to lackOfProductivityFire   ;; Calcule la productivité et licencie les unproduc
       ]
     ]
   ]
+  let numberEmployed length [who] of persons with [employed = True]
   set firingRate numberFired / (numberEmployed + 1)
 end
 @#$#@#$#@
@@ -422,7 +434,7 @@ FRICTION
 FRICTION
 0
 45
-0.0
+40.0
 1
 1
 NIL
@@ -494,10 +506,10 @@ PENS
 "SUM" 1.0 0 -16383231 true "" "plot unemploymentRate + employmentRate"
 
 PLOT
-334
-230
-697
-455
+335
+229
+698
+454
 Vacancy rate
 time
 Vacancy rate
@@ -520,16 +532,16 @@ UNEXPECTED_FIRING
 UNEXPECTED_FIRING
 0
 1
-0.1
+0.01
 0.01
 1
 NIL
 HORIZONTAL
 
 PLOT
-336
+335
 454
-689
+688
 685
 Beveridge Curve
 Unemployment
@@ -539,10 +551,11 @@ Vacancy
 0.0
 3.0
 true
-false
+true
 "" ""
 PENS
-"pen-0" 1.0 2 -7500403 true "" ""
+"low-pressure" 1.0 2 -16777216 true "" ""
+"high-pressure" 1.0 2 -13840069 true "" ""
 
 MONITOR
 0
@@ -581,7 +594,7 @@ NIL
 NIL
 NIL
 NIL
-0
+1
 
 SLIDER
 0
@@ -592,7 +605,7 @@ NUMBER_PERSONS
 NUMBER_PERSONS
 50
 500
-100.0
+300.0
 10
 1
 NIL
@@ -607,7 +620,7 @@ NUMBER_COMPANIES
 NUMBER_COMPANIES
 50
 500
-100.0
+300.0
 10
 1
 NIL
@@ -644,10 +657,10 @@ NIL
 HORIZONTAL
 
 PLOT
-332
-686
-694
-960
+10
+685
+374
+959
 hiring and firing rates
 time
 rate
@@ -661,6 +674,40 @@ true
 PENS
 "hiring rate" 1.0 0 -13840069 true "" "plot hiringRate"
 "firing rate" 1.0 0 -5298144 true "" "plot firingRate"
+
+PLOT
+376
+686
+902
+957
+Mean salary
+id simulation
+mean salary
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"low-pressure" 1.0 0 -16777216 true "" ""
+"high-pressure" 1.0 0 -13840069 true "" ""
+
+SLIDER
+904
+836
+1229
+869
+PRESSURE_SALARY_FROM_COMPANIES
+PRESSURE_SALARY_FROM_COMPANIES
+1
+25
+1.0
+1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
